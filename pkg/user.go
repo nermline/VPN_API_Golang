@@ -7,6 +7,7 @@ type User struct {
 	UserName           string
 	UserEmail          string
 	PasswordHash       string
+	AdblockMembership  bool
 	StaticIpMembership bool
 	TelegramOnlyMode   bool
 	IsCreator          bool
