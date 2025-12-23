@@ -1,0 +1,8 @@
+package api
+
+import "github.com/google/uuid"
+
+type Group struct {
+	GroupID   uuid.UUID
+	GroupName string
+}
