@@ -30,18 +30,18 @@ func RegisterUser(db *sqlx.DB) gin.HandlerFunc {
 }
 
 func CheckAvailability(db *sqlx.DB, table string, variable string, value string) {
-	query := `
-			SELECT EXISTS (
-				SELECT 1 FROM $1 WHERE $2 = $3
-			)
-	`
+	// query := `
+	// 		SELECT EXISTS (
+	// 			SELECT 1 FROM $1 WHERE $2 = $3
+	// 		)
+	// `
 
-	if err := db.Get(&exists); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "database error",
-		})
-		return
-	}
+	// if err := db.Get(&exists); err != nil {
+	// 	c.JSON(http.StatusInternalServerError, gin.H{
+	// 		"error": "database error",
+	// 	})
+	// 	return
+	// }
 
 }
 
