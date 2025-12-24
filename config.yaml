@@ -1,0 +1,6 @@
+Posgress:
+  User: vpnuser
+  Host: localhost
+  DBName: vpnservice
+  Password: 1423
+  SSLMode: disable
