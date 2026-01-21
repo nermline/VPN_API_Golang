@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	var path = "/Users/nermline/Data/Programing projects/VPN_API_Golang/config.yaml"
+	path := "/Users/nermline/Data/Programing projects/VPN_API_Golang/config.yaml"
 	cfg, err := pkg.LoadConfig(path)
 	if err != nil {
 		log.Panic(err)
@@ -25,9 +25,6 @@ func main() {
 	defer db.Close()
 
 	router := gin.Default()
-	router.POST("/api/v1/auth/register", pkg.RegisterUser(db))
-	// router.POST("/api/v1/auth/login", pkg.LoginUser(db))
-	router.GET("/api/v1/users/availability", pkg.CheckUsernameAvailability(db))
-	router.GET("/api/v1/email/availability", pkg.CheckEmailAvailability(db))
+	router.POST("/v1/auth/register", pkg.RegisterHandler(db))
 	router.Run()
 }
