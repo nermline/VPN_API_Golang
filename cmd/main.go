@@ -38,5 +38,6 @@ func main() {
 	router := gin.Default()
 	router.POST("/v1/auth/register", pkg.RegisterHandler(db))
 	router.POST("/v1/auth/login", pkg.LoginHandler(db))
+	router.POST("/v1/auth/refresh", pkg.RefreshHandler(db))
 	router.Run()
 }
