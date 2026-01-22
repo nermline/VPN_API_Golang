@@ -1,7 +1,9 @@
 package main
 
 import (
+	"io"
 	"log"
+	"os"
 
 	"github.com/nermline/VPN_API_Golang/pkg"
 
@@ -10,6 +12,14 @@ import (
 )
 
 func main() {
+	f, err := os.OpenFile("history.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+	multiWriter := io.MultiWriter(f, os.Stdout)
+	log.SetOutput(multiWriter)
+
 	path := "/Users/nermline/Data/Programing projects/VPN_API_Golang/config.yaml"
 	cfg, err := pkg.LoadConfig(path)
 	if err != nil {
@@ -24,7 +34,9 @@ func main() {
 	log.Println("[LOG] Postgres database \"" + cfg.Postgres.DBName + "\" connected")
 	defer db.Close()
 
+	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 	router.POST("/v1/auth/register", pkg.RegisterHandler(db))
+	router.POST("/v1/auth/login", pkg.LoginHandler(db))
 	router.Run()
 }

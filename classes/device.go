@@ -3,20 +3,10 @@ package classes
 import "time"
 
 type Device struct {
-	PublicKey  string
-	Name       string
-	OSName     string
-	ApiKey     string
-	IpMode     StatusIP
-	AssignedIP string
-	LastSeen   time.Time
-	IsActive   bool
-	AppVersion string
+	ID        int       `db:"id"`
+	UUID      string    `db:"device_uid"`
+	Name      string    `db:"device_name"`
+	OS        string    `db:"os"`
+	CreatedAt time.Time `db:"created_at"`
+	LastSeen  time.Time `db:"last_seen"`
 }
-
-type StatusIP int
-
-const (
-	Static StatusIP = iota
-	Dynamic
-)

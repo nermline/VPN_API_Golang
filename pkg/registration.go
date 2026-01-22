@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"github.com/nermline/VPN_API_Golang/classes"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -18,30 +19,7 @@ type RegisterRequest struct {
 	Password string `json:"password" binding:"required,min=8,max=72"`
 }
 
-type RegisterResponse struct {
-	ID       int    `json:"id"`
-	Username string `json:"username"`
-	Email    string `json:"email"`
-}
-
-type User struct {
-	Username string
-	Email    string
-	Password string
-}
-
-func GenerateHash(password string) ([]byte, error) {
-	hash, err := bcrypt.GenerateFromPassword(
-		[]byte(password),
-		bcrypt.DefaultCost,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return hash, nil
-}
-
-func ValidateUserData(user User) error {
+func ValidateRegistrationData(user classes.User) error {
 	user.Username = strings.TrimSpace(user.Username)
 	user.Email = strings.TrimSpace(user.Email)
 	user.Password = strings.TrimSpace(user.Password)
@@ -61,7 +39,7 @@ func ValidateUserData(user User) error {
 	return nil
 }
 
-func CheckUsernameExists(db *sqlx.DB, user User) error {
+func CheckUsernameExists(db *sqlx.DB, user classes.User) error {
 	const query = `
 		SELECT EXISTS (
 			SELECT 1
@@ -82,7 +60,7 @@ func CheckUsernameExists(db *sqlx.DB, user User) error {
 	return nil
 }
 
-func CheckEmailExists(db *sqlx.DB, user User) error {
+func CheckEmailExists(db *sqlx.DB, user classes.User) error {
 	const query = `
 		SELECT EXISTS (
 			SELECT 1
@@ -111,14 +89,14 @@ func HashPassword(password string) (string, error) {
 	return string(hashed), nil
 }
 
-func InsertUser(db *sqlx.DB, user User, hashedPassword string) (int, error) {
+func InsertUser(db *sqlx.DB, user classes.User) (int, error) {
 	query := `
 		INSERT INTO users (username, email, password_hash)
 		VALUES ($1, $2, $3)
 		RETURNING id;
 	`
 	var newID int
-	err := db.QueryRow(query, user.Username, user.Email, hashedPassword).Scan(&newID)
+	err := db.QueryRow(query, user.Username, user.Email, user.Password).Scan(&newID)
 	if err != nil {
 		return 0, err
 	}
@@ -136,13 +114,14 @@ func RegisterHandler(db *sqlx.DB) gin.HandlerFunc {
 			return
 		}
 
-		user := User{
+		user := classes.User{
+			ID:       0,
 			Username: req.Username,
 			Email:    req.Email,
 			Password: req.Password,
 		}
 
-		if err := ValidateUserData(user); err != nil {
+		if err := ValidateRegistrationData(user); err != nil {
 			log.Printf("[WARN] Validation failed for username=%s: %v", user.Username, err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -150,6 +129,7 @@ func RegisterHandler(db *sqlx.DB) gin.HandlerFunc {
 
 		if err := CheckUsernameExists(db, user); err != nil {
 			if err.Error() == "username already taken" {
+				log.Printf("[WARN] Validation failed for username=%s: %v", user.Username, err)
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 				return
 			}
@@ -159,6 +139,7 @@ func RegisterHandler(db *sqlx.DB) gin.HandlerFunc {
 		}
 
 		if err := CheckEmailExists(db, user); err != nil {
+			log.Printf("[WARN] Validation failed for email=%s: %v", user.Username, err)
 			if err.Error() == "email already taken" {
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 				return
@@ -175,18 +156,21 @@ func RegisterHandler(db *sqlx.DB) gin.HandlerFunc {
 			return
 		}
 
-		newID, err := InsertUser(db, user, hashedPassword)
+		user.Password = hashedPassword
+
+		newID, err := InsertUser(db, user)
 		if err != nil {
 			log.Printf("[ERROR] InsertUser failed for username=%s, email=%s: %v", user.Username, user.Email, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}
 
-		c.JSON(http.StatusCreated, RegisterResponse{
-			ID:       newID,
-			Username: user.Username,
-			Email:    user.Email,
+		user.ID = newID
+
+		c.JSON(http.StatusCreated, gin.H{
+			"message": "account created",
 		})
+
 		log.Printf("[LOG] User %s created successfully!", user.Username)
 
 	}
