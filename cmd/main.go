@@ -34,7 +34,7 @@ func main() {
 	log.Println("[LOG] Postgres database \"" + cfg.Postgres.DBName + "\" connected")
 	defer db.Close()
 
-	gin.SetMode(gin.ReleaseMode)
+	// gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 	router.POST("/v1/auth/register", pkg.RegisterHandler(db))
 	router.POST("/v1/auth/login", pkg.LoginHandler(db))
@@ -44,5 +44,5 @@ func main() {
 		router.GET("/v1/users/me", pkg.UserInfoHandler(db))
 		router.POST("/v1/auth/logout", pkg.LogoutHandler(db))
 	}
-	router.Run()
+	router.Run("0.0.0.0:8080")
 }
