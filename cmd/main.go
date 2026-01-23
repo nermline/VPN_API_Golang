@@ -42,7 +42,10 @@ func main() {
 	router.Use(pkg.AuthMiddleware())
 	{
 		router.GET("/v1/users/me", pkg.UserInfoHandler(db))
+		router.POST("/v1/session/connect", pkg.ConnectHandler(db))
+		router.POST("/v1/session/disconnect", pkg.DisconnectHandler(db))
 		router.POST("/v1/auth/logout", pkg.LogoutHandler(db))
+
 	}
 	router.Run("0.0.0.0:8080")
 }
