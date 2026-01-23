@@ -32,3 +32,4 @@ go.work.sum
 # .vscode/
 history.log
 API_structure
+user_info.go
