@@ -50,5 +50,9 @@ func LogoutHandler(db *sqlx.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
 			return
 		}
+
+		c.JSON(http.StatusCreated, gin.H{
+			"message": "logout",
+		})
 	}
 }
