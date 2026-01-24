@@ -20,7 +20,7 @@ func main() {
 	multiWriter := io.MultiWriter(f, os.Stdout)
 	log.SetOutput(multiWriter)
 
-	path := "/Users/nermline/Data/Programing projects/VPN_API_Golang/config.yaml"
+	path := "./config.yaml"
 	cfg, err := pkg.LoadConfig(path)
 	if err != nil {
 		log.Panic(err)
@@ -47,5 +47,5 @@ func main() {
 		router.POST("/v1/auth/logout", pkg.LogoutHandler(db))
 
 	}
-	router.Run("0.0.0.0:8080")
+	router.Run("0.0.0.0:8088")
 }
