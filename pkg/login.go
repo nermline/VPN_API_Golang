@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -15,7 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
-	"github.com/nermline/VPN_API_Golang/classes"
+	"github.com/nermline/VPN_API_Golang/types"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -39,47 +40,57 @@ func ValidateLoginData(req *LoginRequest) error {
 	req.Username = strings.TrimSpace(req.Username)
 	req.Password = strings.TrimSpace(req.Password)
 
-	if req.Username == "" || req.Password == "" || req.DeviceName == "" || req.OS == "" || req.DeviceUUID == "" {
-		return errors.New("user credentials and device info are required")
+	if req.Username == "" {
+		return errors.New("ValidateLoginData: Username is empty")
 	}
+	if req.DeviceName == "" {
+		return errors.New("ValidateLoginData: Device name is empty")
+	}
+	if req.OS == "" {
+		return errors.New("ValidateLoginData: OS name is empty")
+	}
+	if req.DeviceUUID == "" {
+		return errors.New("DeviceUUID is empty")
+	}
+
 	if len(req.DeviceName) > 30 {
-		return errors.New("device name too long")
+		return errors.New("Device name too long")
 	}
 	if len(req.OS) > 30 {
-		return errors.New("os name too long")
+		return errors.New("OS name too long")
 	}
 
 	if !uuidRegex.MatchString(req.DeviceUUID) {
-		return errors.New("invalid uuid format")
+		return errors.New("Invalid uuid format")
 	}
 	return nil
 }
 
-func CheckUser(db *sqlx.DB, req LoginRequest) (*classes.User, error) {
+func CheckUser(db *sqlx.DB, req LoginRequest) (*types.User, error) {
 	query := `SELECT * FROM users WHERE username = $1`
-	user := classes.User{}
+	user := types.User{}
 	err := db.Get(&user, query, req.Username)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, errors.New("credentials failed")
+			return nil, errors.New("Credentials failed")
 		}
-		return nil, err
+		return nil, fmt.Errorf("CheckUser: %v", err)
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
 	if err != nil {
-		return nil, errors.New("credentials failed")
+		return nil, errors.New("Credentials failed")
 	}
 	return &user, nil
 }
 
-func IdentifyDevice(db *sqlx.DB, req LoginRequest) (*classes.Device, error) {
+func IdentifyDevice(db *sqlx.DB, req LoginRequest) (*types.Device, error) {
 	const query = `SELECT * FROM devices WHERE device_uid = $1`
-	var device classes.Device
+	var device types.Device
 	err := db.Get(&device, query, req.DeviceUUID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return &classes.Device{
+			return &types.Device{
 				ID:        0,
 				UUID:      req.DeviceUUID,
 				Name:      req.DeviceName,
@@ -88,7 +99,7 @@ func IdentifyDevice(db *sqlx.DB, req LoginRequest) (*classes.Device, error) {
 				LastSeen:  time.Now(),
 			}, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("IdentifyDevice: %v", err)
 	}
 
 	device.Name = req.DeviceName
@@ -101,20 +112,20 @@ func GenerateRefreshToken() (string, error) {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("GenerateRefreshToken: %v", err)
 	}
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-func CreateSession(db *sqlx.DB, user classes.User, device classes.Device) (*classes.Session, error) {
+func CreateSession(db *sqlx.DB, user types.User, device types.Device) (*types.Session, error) {
 	refreshToken, err := GenerateRefreshToken()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("CreateSession: %v", err)
 	}
 
 	tokenExpiresAt := time.Now().Add(180 * 24 * time.Hour)
 
-	session := classes.Session{
+	session := types.Session{
 		ID:           0,
 		UserID:       user.ID,
 		DeviceID:     device.ID,
@@ -126,17 +137,16 @@ func CreateSession(db *sqlx.DB, user classes.User, device classes.Device) (*clas
 	return &session, nil
 }
 
-func getJWTSecret() []byte {
+func GetJWTSecret() []byte {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		return []byte("JWT_SECRET_KEY") // Тільки для дева!
+		log.Panic("[CRITICAL] ADD ENV VARIABLE \"JWT_SECRET\" RIGHT NOW!")
 	}
 	return []byte(secret)
 }
 
-func GenerateAccessToken(user classes.User, session classes.Session) (string, int, error) {
+func GenerateAccessToken(user types.User, session types.Session, secretKey []byte) (string, int, error) {
 	tokenLifeTime := 15 * time.Second
-	secretKey := getJWTSecret()
 
 	claims := jwt.MapClaims{
 		"exp":        time.Now().Add(tokenLifeTime).Unix(),
@@ -148,13 +158,13 @@ func GenerateAccessToken(user classes.User, session classes.Session) (string, in
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signedToken, err := token.SignedString(secretKey)
 	if err != nil {
-		return "", 0, err
+		return "", 0, fmt.Errorf("GenerateAccessToken: %v", err)
 	}
 
 	return signedToken, int(tokenLifeTime.Seconds()), nil
 }
 
-func WriteLoginChanges(db *sqlx.DB, device *classes.Device, session *classes.Session) error {
+func WriteLoginChanges(db *sqlx.DB, device *types.Device, session *types.Session) error {
 	var query string
 	var args []interface{}
 
@@ -186,7 +196,7 @@ func WriteLoginChanges(db *sqlx.DB, device *classes.Device, session *classes.Ses
 		}
 
 		if err := db.QueryRow(query, args...).Scan(&session.ID); err != nil {
-			return err
+			return fmt.Errorf("WriteLoginChanges: %v", err)
 		}
 
 	} else {
@@ -213,24 +223,24 @@ func WriteLoginChanges(db *sqlx.DB, device *classes.Device, session *classes.Ses
 		}
 
 		if err := db.QueryRow(query, args...).Scan(&session.ID, &device.ID); err != nil {
-			return err
+			return fmt.Errorf("WriteLoginChanges: %v", err)
 		}
 	}
 
 	return nil
 }
 
-func LoginHandler(db *sqlx.DB) gin.HandlerFunc {
+func LoginHandler(db *sqlx.DB, secretKey []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req LoginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			log.Printf("[WARN] Invalid request body: %v", err)
+			log.Printf("[ERROR] Invalid request body: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 			return
 		}
 
 		if err := ValidateLoginData(&req); err != nil {
-			log.Printf("[WARN] Validation failed for username=%s: %v", req.Username, err)
+			log.Printf("[ERROR] Validation failed for username=%s: %v", req.Username, err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -238,38 +248,38 @@ func LoginHandler(db *sqlx.DB) gin.HandlerFunc {
 		user, err := CheckUser(db, req)
 		if err != nil {
 			if err.Error() == "credentials failed" {
-				log.Printf("[WARN] Auth failed for username=%s", req.Username)
+				log.Printf("[ERROR] Auth failed for username=%s", req.Username)
 				c.JSON(http.StatusBadRequest, gin.H{"error": "username or password failed"})
 				return
 			}
-			log.Printf("[ERROR] DB error checking user %s: %v", req.Username, err)
+			log.Printf("[ERROR] Auth DB error for %s: %v", req.Username, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}
 
 		device, err := IdentifyDevice(db, req)
 		if err != nil {
-			log.Printf("[ERROR] IdentifyDevice failed: %v", err)
+			log.Printf("[ERROR] %v: ", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}
 
 		session, err := CreateSession(db, *user, *device)
 		if err != nil {
-			log.Printf("[ERROR] CreateSession failed: %v", err)
+			log.Printf("[ERROR] %v: ", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}
 
 		if err := WriteLoginChanges(db, device, session); err != nil {
-			log.Printf("[ERROR] WriteLoginChanges failed: %v", err)
+			log.Printf("[ERROR] %v: ", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}
 
-		accessToken, accessTokenLifeTime, err := GenerateAccessToken(*user, *session)
+		accessToken, accessTokenLifeTime, err := GenerateAccessToken(*user, *session, secretKey)
 		if err != nil {
-			log.Printf("[ERROR] GenerateAccessToken failed: %v", err)
+			log.Printf("[ERROR] %v: ", err)
 			// Тут можна було б теоретично відкотити транзакцію, але в нас її немає.
 			// Сесія залишиться в базі, але юзер не отримає токен. Це не критично, просто "мертва" сесія.
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})

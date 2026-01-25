@@ -1,4 +1,4 @@
-package classes
+package types
 
 type User struct {
 	ID       int    `db:"id"`

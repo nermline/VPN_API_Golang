@@ -7,22 +7,22 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/nermline/VPN_API_Golang/classes"
+	"github.com/nermline/VPN_API_Golang/types"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-func AddWireGuardPeer(wg *wgctrl.Client, config *Config, vpn_config *classes.VPNConfig) error {
+func AddWireGuardPeer(wg *wgctrl.Client, config *Config, vpn_config *types.VPNConfig) error {
 	pubKey, err := wgtypes.ParseKey(vpn_config.ClientPublicKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("AddWireGuardPeer (%v): %v", vpn_config.ClientPublicKey, err)
 	}
 
 	_, ipNet, err := net.ParseCIDR(vpn_config.InternalIP + "/32")
 	if err != nil {
 		ip := net.ParseIP(vpn_config.InternalIP)
 		if ip == nil {
-			return err
+			return fmt.Errorf("AddWireGuardPeer (%v): %v", vpn_config.ClientPublicKey, err)
 		}
 		ipNet = &net.IPNet{
 			IP:   ip,
@@ -43,7 +43,7 @@ func AddWireGuardPeer(wg *wgctrl.Client, config *Config, vpn_config *classes.VPN
 	})
 
 	if err != nil {
-		return err
+		return fmt.Errorf("AddWireGuardPeer (%v): %v", vpn_config.ClientPublicKey, err)
 	}
 
 	return nil
@@ -52,7 +52,7 @@ func AddWireGuardPeer(wg *wgctrl.Client, config *Config, vpn_config *classes.VPN
 func RemoveWireGuardPeer(wg *wgctrl.Client, config *Config, peer string) error {
 	pubKey, err := wgtypes.ParseKey(peer)
 	if err != nil {
-		return fmt.Errorf("invalid public key in db: %w", err)
+		return fmt.Errorf("RemoveWireGuardPeer (%v): %v", peer, err)
 	}
 
 	peerConfig := wgtypes.PeerConfig{
@@ -65,7 +65,7 @@ func RemoveWireGuardPeer(wg *wgctrl.Client, config *Config, peer string) error {
 	})
 
 	if err != nil {
-		return err
+		return fmt.Errorf("RemoveWireGuardPeer (%v): %v", peer, err)
 	}
 
 	return nil
@@ -77,7 +77,7 @@ func CleanupStalePeers(wg *wgctrl.Client, config *Config, db *sqlx.DB) error {
 
 	device, err := wg.Device(config.Wireguard.Interface)
 	if err != nil {
-		return fmt.Errorf("failed to get device: %w", err)
+		return fmt.Errorf("CleanupStalePeers: Failed to get device: %v", err)
 	}
 
 	var peersToRemove []wgtypes.PeerConfig
@@ -88,25 +88,19 @@ func CleanupStalePeers(wg *wgctrl.Client, config *Config, db *sqlx.DB) error {
 		lastHandshake := peer.LastHandshakeTime
 		shouldRemove := false
 
-		// ВАРІАНТ А: Користувач підключався, але давно (> 5 хв)
 		if !lastHandshake.IsZero() && time.Since(lastHandshake) > timeoutDuration {
 			shouldRemove = true
-			log.Printf("[INFO] Peer %s inactive since %s. Marking for removal.", pubKey, lastHandshake)
+			log.Printf("[INFO] Peer %v inactive since %v. Marking for removal.", pubKey, lastHandshake)
 		}
 
-		// ВАРІАНТ Б: Користувач НІКОЛИ не підключався (Handshake == 0)
-		// Треба перевірити, чи це не свіжий акаунт, створений 1 хвилину тому.
 		if lastHandshake.IsZero() {
 			var createdAt time.Time
-			// Перевіряємо дату створення в БД
 			err := db.Get(&createdAt, "SELECT created_at FROM vpn_configs WHERE client_public_key = $1", pubKey)
 
 			if err != nil {
-				// Якщо запису немає в БД, але він висить у WG — це сміття, видаляємо
-				log.Printf("[WARN] Peer %s not found in DB. Removing garbage.", pubKey)
+				log.Printf("[INFO] Peer %s not found in DB. Removing garbage.", pubKey)
 				shouldRemove = true
 			} else {
-				// Якщо запис є, перевіряємо, чи він "старий"
 				if createdAt.Before(cutoffTime) {
 					shouldRemove = true
 					log.Printf("[INFO] Peer %s never connected and expired (created at %s).", pubKey, createdAt)
@@ -123,38 +117,31 @@ func CleanupStalePeers(wg *wgctrl.Client, config *Config, db *sqlx.DB) error {
 		}
 	}
 
-	// 3. Якщо нікого видаляти — виходимо
 	if len(peersToRemove) == 0 {
-		log.Printf("[CLEAN] Nothing to clean")
 		return nil
 	}
 
-	// 4. Видаляємо з інтерфейсу WireGuard (пакетом)
 	err = wg.ConfigureDevice(config.Wireguard.Interface, wgtypes.Config{
 		Peers: peersToRemove,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to remove peers from interface: %w", err)
+		return fmt.Errorf("Failed to remove peers from %v: %v", config.Wireguard.Interface, err)
 	}
 
-	// 5. Видаляємо/Оновлюємо записи в БД
-	// Використовуємо sqlx.In для масового запиту
-
-	// Крок 5.2: Видаляємо самі конфіги (як ви просили "видаляти записи")
 	queryDeleteConfigs := `DELETE FROM vpn_configs WHERE client_public_key IN (?)`
 	queryDeleteConfigs, argsConfig, err := sqlx.In(queryDeleteConfigs, keysToRemove)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to remove peers from %v: %v", config.Wireguard.Interface, err)
 	}
 	queryDeleteConfigs = db.Rebind(queryDeleteConfigs)
 
 	result, err := db.Exec(queryDeleteConfigs, argsConfig...)
 	if err != nil {
-		return fmt.Errorf("failed to delete configs from DB: %w", err)
+		return fmt.Errorf("Failed to remove peers from %v: %v", config.Wireguard.Interface, err)
 	}
 
 	rows, _ := result.RowsAffected()
-	log.Printf("[SUCCESS] Cleaned up %d inactive peers.", rows)
+	log.Printf("[INFO] Cleaned up %d inactive peers.", rows)
 
 	return nil
 }

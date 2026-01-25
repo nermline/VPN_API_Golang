@@ -1,14 +1,16 @@
 package pkg
 
 import (
+	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Postgres  DBConfig `yaml:"Posgress"`
-	Wireguard WGConfig `yaml:"Wireguard"`
+	Postgres  DBConfig  `yaml:"Posgress"`
+	Wireguard WGConfig  `yaml:"Wireguard"`
+	API       APIConfig `yaml:"API"`
 }
 
 type DBConfig struct {
@@ -21,16 +23,24 @@ type DBConfig struct {
 
 type WGConfig struct {
 	Interface string `yaml:"Interface"`
+	DNS       string `yaml:"DNS"`
+	Port      string `yaml:"Port"`
+}
+
+type APIConfig struct {
+	Listen string `yaml:"Listen"`
+	Port   string `yaml:"Port"`
+	Domain string `yaml:"Domain"`
 }
 
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("LoadConfig: %v", err)
 	}
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("LoadConfig: %v", err)
 	}
 	return &cfg, nil
 }

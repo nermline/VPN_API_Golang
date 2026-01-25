@@ -2,21 +2,21 @@ package pkg
 
 import (
 	"database/sql"
-	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
-	"github.com/nermline/VPN_API_Golang/classes"
+	"github.com/nermline/VPN_API_Golang/types"
 )
 
 type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
-func GetFullSessionInfo(db *sqlx.DB, refreshToken string) (*classes.Session, *classes.User, *classes.Device, error) {
+func GetFullSessionInfo(db *sqlx.DB, refreshToken string) (*types.Session, *types.User, *types.Device, error) {
 	query := `
 		SELECT 
 			s.id, s.user_id, s.device_id, s.refresh_token, s.created_at, s.expires_at, s.revoked_at,
@@ -28,9 +28,9 @@ func GetFullSessionInfo(db *sqlx.DB, refreshToken string) (*classes.Session, *cl
 		WHERE s.refresh_token = $1
 	`
 
-	var session classes.Session
-	var user classes.User
-	var device classes.Device
+	var session types.Session
+	var user types.User
+	var device types.Device
 
 	row := db.QueryRow(query, refreshToken)
 
@@ -57,26 +57,26 @@ func GetFullSessionInfo(db *sqlx.DB, refreshToken string) (*classes.Session, *cl
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil, nil, errors.New("session not found")
+			return nil, nil, nil, fmt.Errorf("GetFullSessionInfo: Session %v not found", session.ID)
 		}
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("GetFullSessionInfo: %v", err)
 	}
 
 	return &session, &user, &device, nil
 }
 
-func RotateRefreshToken(session classes.Session) (*classes.Session, error) {
+func RotateRefreshToken(session types.Session) (*types.Session, error) {
 	if session.Revoked != nil {
-		return nil, errors.New("session revoked")
+		return nil, fmt.Errorf("RotateRefreshToken: Session %v revoked", session.ID)
 	}
 
 	if time.Now().After(session.ExpiresAt) {
-		return nil, errors.New("refresh token expired")
+		return nil, fmt.Errorf("RotateRefreshToken: Session %v refresh token expired", session.ID)
 	}
 
 	newToken, err := GenerateRefreshToken()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("RotateRefreshToken: %v", err)
 	}
 	session.RefreshToken = newToken
 	session.CreatedAt = time.Now()
@@ -84,7 +84,7 @@ func RotateRefreshToken(session classes.Session) (*classes.Session, error) {
 	return &session, nil
 }
 
-func WriteRefreshChanges(db *sqlx.DB, session classes.Session, device classes.Device) error {
+func WriteRefreshChanges(db *sqlx.DB, session types.Session, device types.Device) error {
 	query := `
         WITH upd_device AS (
             UPDATE devices
@@ -105,49 +105,45 @@ func WriteRefreshChanges(db *sqlx.DB, session classes.Session, device classes.De
 		session.ID,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("WriteRefreshChanges: %v", err)
 	}
 	return nil
 }
 
-func RefreshHandler(db *sqlx.DB) gin.HandlerFunc {
+func RefreshHandler(db *sqlx.DB, secretKey []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req RefreshRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			log.Printf("[ERROR] Invalid request body: %v | Client: %v", err, c.ClientIP())
 			return
 		}
 
 		session, user, device, err := GetFullSessionInfo(db, req.RefreshToken)
 		if err != nil {
-			if err.Error() == "session not found" {
-				log.Printf("[WARN] GetFullSessionInfo failed for refresh token=%s: %v", req.RefreshToken, err)
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired refresh token"})
-				return
-			}
-			log.Printf("[WARN] GetFullSessionInfo failed for refresh token=%s: %v", req.RefreshToken, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired refresh token"})
+			log.Printf("[Error] Refresh failed: %v | Client: %v", err, c.ClientIP())
 			return
 		}
 
 		session, err = RotateRefreshToken(*session)
 		if err != nil {
-			log.Printf("[WARN] Refresh failed: %v", err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired refresh token"})
+			log.Printf("[ERROR] Refresh failed: %v | Client: %v", err, c.ClientIP())
 			return
 		}
 
 		err = WriteRefreshChanges(db, *session, *device)
 		if err != nil {
-			log.Printf("[ERROR] WriteRefreshChanges failed: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired refresh token"})
+			log.Printf("[ERROR] Refresh failed: %v | Client: %v", err, c.ClientIP())
 			return
 		}
 
-		accessToken, expiresIn, err := GenerateAccessToken(*user, *session)
+		accessToken, expiresIn, err := GenerateAccessToken(*user, *session, secretKey)
 		if err != nil {
-			log.Printf("[ERROR] Token generation failed: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			log.Printf("[ERROR] Access token generation failed: %v | Client: %v", err, c.ClientIP())
 			return
 		}
 
@@ -157,7 +153,7 @@ func RefreshHandler(db *sqlx.DB) gin.HandlerFunc {
 			RefreshToken:       session.RefreshToken,
 		})
 
-		log.Printf("[LOG] Refresh successful for session %v with device %s", session.ID, device.Name)
+		log.Printf("[LOG] Refresh successful for session %v", session.ID)
 
 	}
 }

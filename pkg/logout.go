@@ -13,7 +13,8 @@ func LogoutHandler(wg *wgctrl.Client, config *Config, db *sqlx.DB) gin.HandlerFu
 	return func(c *gin.Context) {
 		sessionID, err := GetIDFromContext(c, "sessionID")
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "auth error"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid or expired token"})
+			log.Printf("[ERROR] %v: ", err)
 			return
 		}
 
@@ -21,12 +22,12 @@ func LogoutHandler(wg *wgctrl.Client, config *Config, db *sqlx.DB) gin.HandlerFu
 		queryGet := `SELECT client_public_key FROM vpn_configs WHERE session_id = $1`
 		err = db.Get(&clientPublicKey, queryGet, sessionID)
 		if err != nil {
-			log.Printf("[WARN] (LOGOUT) SELECT client_public_key failed: %v", err)
+			log.Printf("[ERROR] Failed to find public key of session %v: %v", sessionID, err)
 		}
 
 		err = RemoveWireGuardPeer(wg, config, clientPublicKey)
 		if err != nil {
-			log.Printf("[WARN] RemoveWireGuardPeer failed: %v", err)
+			log.Printf("[ERROR] %v: ", err)
 		}
 
 		_, err = db.Exec("DELETE FROM vpn_configs WHERE session_id = $1", sessionID)
@@ -40,7 +41,7 @@ func LogoutHandler(wg *wgctrl.Client, config *Config, db *sqlx.DB) gin.HandlerFu
         `
 		_, err = db.Exec(query, sessionID)
 		if err != nil {
-			log.Printf("failed to revoke session: %v", err)
+			log.Printf("[ERROR] Failed to revoke session %v: %v", sessionID, err)
 		}
 
 		c.JSON(http.StatusOK, gin.H{

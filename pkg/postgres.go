@@ -18,10 +18,8 @@ func NewPostgres(cfg DBConfig) (*sqlx.DB, error) {
 
 	db, err := sqlx.Connect("postgres", destination)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewPostgres: %v", err)
 	}
 
 	return db, nil
 }
-
-

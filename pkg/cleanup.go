@@ -13,7 +13,7 @@ func StartCleanupWorker(wg *wgctrl.Client, config *Config, db *sqlx.DB) {
 	go func() {
 		for range ticker.C {
 			if err := CleanupStalePeers(wg, config, db); err != nil {
-				log.Printf("[ERROR] CleanupStalePeers failed: %v", err)
+				log.Printf("[ERROR] Cleanup worker failed: %v", err)
 			}
 		}
 	}()

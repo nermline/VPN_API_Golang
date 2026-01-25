@@ -1,3 +1,7 @@
+API:
+  Listen: 127.0.0.1
+  Port: 8080
+  Domain: api.nermline.xyz
 Posgress:
   User: vpnuser
   Host: localhost
@@ -6,3 +10,5 @@ Posgress:
   SSLMode: disable
 Wireguard:
   Interface: wg0
+  DNS: 10.0.0.1
+  Port: 51820

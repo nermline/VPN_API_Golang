@@ -1,4 +1,4 @@
-package classes
+package types
 
 import "time"
 
