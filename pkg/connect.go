@@ -85,30 +85,30 @@ func GetFreeIP(db *sqlx.DB, cidr string) (string, error) {
 }
 
 func GetConfig(db *sqlx.DB, publicKey string, sessionID int) (*classes.VPNConfig, error) {
-	var config classes.VPNConfig
-	err := db.Get(&config, "SELECT * FROM vpn_configs WHERE session_id = $1", sessionID)
+	var vpn_config classes.VPNConfig
+	err := db.Get(&vpn_config, "SELECT * FROM vpn_configs WHERE session_id = $1", sessionID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			internalIP, err := GetFreeIP(db, "10.0.0.0/24")
 			if err != nil {
 				return nil, err
 			}
-			config := classes.VPNConfig{
+			vpn_config := classes.VPNConfig{
 				ID:              0,
 				SessionID:       sessionID,
 				InternalIP:      internalIP,
 				ClientPublicKey: publicKey,
 				CreatedAt:       time.Now(),
 			}
-			return &config, nil
+			return &vpn_config, nil
 		}
 		return nil, err
 	}
 
-	return &config, nil
+	return &vpn_config, nil
 }
 
-func ConnectHandler(wg *wgctrl.Client, db *sqlx.DB) gin.HandlerFunc {
+func ConnectHandler(wg *wgctrl.Client, config *Config, db *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req ConnectRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -122,11 +122,11 @@ func ConnectHandler(wg *wgctrl.Client, db *sqlx.DB) gin.HandlerFunc {
 			return
 		}
 
-		var config *classes.VPNConfig
+		var vpn_config *classes.VPNConfig
 		maxRetries := 3
 
 		for i := 0; i < maxRetries; i++ {
-			config, err = GetConfig(db, req.PublicKey, sessionID)
+			vpn_config, err = GetConfig(db, req.PublicKey, sessionID)
 			if err != nil {
 				log.Printf("[ERROR] GetConfig attempt %d failed: %s", i, err)
 				if i == maxRetries-1 {
@@ -137,33 +137,33 @@ func ConnectHandler(wg *wgctrl.Client, db *sqlx.DB) gin.HandlerFunc {
 				continue
 			}
 
-			if config.ID != 0 {
+			if vpn_config.ID != 0 {
 				break
 			}
 
-			err = WriteConnectChanges(db, config)
+			err = WriteConnectChanges(db, vpn_config)
 			if err == nil {
 				break
 			}
 
-			log.Printf("[WARN] Race condition detected for IP %s, retrying...", config.InternalIP)
+			log.Printf("[WARN] Race condition detected for IP %s, retrying...", vpn_config.InternalIP)
 			time.Sleep(50 * time.Millisecond)
 		}
 
-		if config.ID != 0 && config.ClientPublicKey != req.PublicKey {
+		if vpn_config.ID != 0 && vpn_config.ClientPublicKey != req.PublicKey {
 			log.Printf("[INFO] Key rotation for session %d", sessionID)
 
-			_ = RemoveWireGuardPeer(wg, config.ClientPublicKey)
+			_ = RemoveWireGuardPeer(wg, config, vpn_config.ClientPublicKey)
 
-			err = UpdateClientKey(db, config.ID, req.PublicKey)
+			err = UpdateClientKey(db, vpn_config.ID, req.PublicKey)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update key"})
 				return
 			}
-			config.ClientPublicKey = req.PublicKey
+			vpn_config.ClientPublicKey = req.PublicKey
 		}
 
-		err = AddWireGuardPeer(wg, config)
+		err = AddWireGuardPeer(wg, config, vpn_config)
 		if err != nil {
 			log.Printf("[ERROR] AddWireGuardPeer failed: %s", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "vpn sync error"})
@@ -172,7 +172,7 @@ func ConnectHandler(wg *wgctrl.Client, db *sqlx.DB) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{
 			"interface": gin.H{
-				"address": config.InternalIP + "/24",
+				"address": vpn_config.InternalIP + "/24",
 				"dns":     "10.0.0.1",
 			},
 			"peer": gin.H{

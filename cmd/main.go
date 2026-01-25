@@ -42,7 +42,7 @@ func main() {
 	log.Println("[LOG] Wireguard client connected")
 	defer wg.Close()
 
-	pkg.StartCleanupWorker(wg, db)
+	pkg.StartCleanupWorker(wg, cfg, db)
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
@@ -52,9 +52,9 @@ func main() {
 	router.Use(pkg.AuthMiddleware(db))
 	{
 		router.GET("/v1/users/me", pkg.UserInfoHandler(db))
-		router.POST("/v1/session/connect", pkg.ConnectHandler(wg, db))
-		router.POST("/v1/session/disconnect", pkg.DisconnectHandler(wg, db))
-		router.POST("/v1/auth/logout", pkg.LogoutHandler(wg, db))
+		router.POST("/v1/session/connect", pkg.ConnectHandler(wg, cfg, db))
+		router.POST("/v1/session/disconnect", pkg.DisconnectHandler(wg, cfg, db))
+		router.POST("/v1/auth/logout", pkg.LogoutHandler(wg, cfg, db))
 
 	}
 	router.Run("127.0.0.1:8088")

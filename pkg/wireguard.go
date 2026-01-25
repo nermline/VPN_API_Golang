@@ -12,17 +12,15 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-const WGInterface = "wg0"
-
-func AddWireGuardPeer(wg *wgctrl.Client, config *classes.VPNConfig) error {
-	pubKey, err := wgtypes.ParseKey(config.ClientPublicKey)
+func AddWireGuardPeer(wg *wgctrl.Client, config *Config, vpn_config *classes.VPNConfig) error {
+	pubKey, err := wgtypes.ParseKey(vpn_config.ClientPublicKey)
 	if err != nil {
 		return err
 	}
 
-	_, ipNet, err := net.ParseCIDR(config.InternalIP + "/32")
+	_, ipNet, err := net.ParseCIDR(vpn_config.InternalIP + "/32")
 	if err != nil {
-		ip := net.ParseIP(config.InternalIP)
+		ip := net.ParseIP(vpn_config.InternalIP)
 		if ip == nil {
 			return err
 		}
@@ -40,7 +38,7 @@ func AddWireGuardPeer(wg *wgctrl.Client, config *classes.VPNConfig) error {
 		AllowedIPs:        []net.IPNet{*ipNet},
 	}
 
-	err = wg.ConfigureDevice(WGInterface, wgtypes.Config{
+	err = wg.ConfigureDevice(config.Wireguard.Interface, wgtypes.Config{
 		Peers: []wgtypes.PeerConfig{peerConfig},
 	})
 
@@ -51,7 +49,7 @@ func AddWireGuardPeer(wg *wgctrl.Client, config *classes.VPNConfig) error {
 	return nil
 }
 
-func RemoveWireGuardPeer(wg *wgctrl.Client, peer string) error {
+func RemoveWireGuardPeer(wg *wgctrl.Client, config *Config, peer string) error {
 	pubKey, err := wgtypes.ParseKey(peer)
 	if err != nil {
 		return fmt.Errorf("invalid public key in db: %w", err)
@@ -62,7 +60,7 @@ func RemoveWireGuardPeer(wg *wgctrl.Client, peer string) error {
 		Remove:    true,
 	}
 
-	err = wg.ConfigureDevice(WGInterface, wgtypes.Config{
+	err = wg.ConfigureDevice(config.Wireguard.Interface, wgtypes.Config{
 		Peers: []wgtypes.PeerConfig{peerConfig},
 	})
 
@@ -73,11 +71,11 @@ func RemoveWireGuardPeer(wg *wgctrl.Client, peer string) error {
 	return nil
 }
 
-func CleanupStalePeers(wg *wgctrl.Client, db *sqlx.DB) error {
+func CleanupStalePeers(wg *wgctrl.Client, config *Config, db *sqlx.DB) error {
 	timeoutDuration := 5 * time.Minute
 	cutoffTime := time.Now().Add(-timeoutDuration)
 
-	device, err := wg.Device(WGInterface)
+	device, err := wg.Device(config.Wireguard.Interface)
 	if err != nil {
 		return fmt.Errorf("failed to get device: %w", err)
 	}
@@ -132,7 +130,7 @@ func CleanupStalePeers(wg *wgctrl.Client, db *sqlx.DB) error {
 	}
 
 	// 4. Видаляємо з інтерфейсу WireGuard (пакетом)
-	err = wg.ConfigureDevice(WGInterface, wgtypes.Config{
+	err = wg.ConfigureDevice(config.Wireguard.Interface, wgtypes.Config{
 		Peers: peersToRemove,
 	})
 	if err != nil {

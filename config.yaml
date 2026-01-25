@@ -4,3 +4,5 @@ Posgress:
   DBName: vpnservice
   Password: 1423
   SSLMode: disable
+Wireguard:
+  Interface: wg0

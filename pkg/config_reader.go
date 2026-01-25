@@ -7,7 +7,8 @@ import (
 )
 
 type Config struct {
-	Postgres DBConfig `yaml:"Posgress"`
+	Postgres  DBConfig `yaml:"Posgress"`
+	Wireguard WGConfig `yaml:"Wireguard"`
 }
 
 type DBConfig struct {
@@ -16,6 +17,10 @@ type DBConfig struct {
 	Host     string `yaml:"Host"`
 	DBName   string `yaml:"DBName"`
 	SSLMode  string `yaml:"SSLMode"`
+}
+
+type WGConfig struct {
+	Interface string `yaml:"Interface"`
 }
 
 func LoadConfig(path string) (*Config, error) {

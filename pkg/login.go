@@ -135,7 +135,7 @@ func getJWTSecret() []byte {
 }
 
 func GenerateAccessToken(user classes.User, session classes.Session) (string, int, error) {
-	tokenLifeTime := 15 * time.Minute
+	tokenLifeTime := 15 * time.Second
 	secretKey := getJWTSecret()
 
 	claims := jwt.MapClaims{

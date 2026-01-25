@@ -10,7 +10,7 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl"
 )
 
-func DisconnectHandler(wg *wgctrl.Client, db *sqlx.DB) gin.HandlerFunc {
+func DisconnectHandler(wg *wgctrl.Client, config *Config, db *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionID, err := GetIDFromContext(c, "sessionID")
 		if err != nil {
@@ -31,7 +31,7 @@ func DisconnectHandler(wg *wgctrl.Client, db *sqlx.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
 			return
 		}
-		err = RemoveWireGuardPeer(wg, clientPublicKey)
+		err = RemoveWireGuardPeer(wg, config, clientPublicKey)
 		if err != nil {
 			log.Printf("[WARN] Failed to remove peer from WireGuard: %v", err)
 		}
