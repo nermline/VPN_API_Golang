@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	"github.com/nermline/VPN_API_Golang/classes"
+	"golang.zx2c4.com/wireguard/wgctrl"
 )
 
 type ConnectRequest struct {
@@ -107,7 +108,7 @@ func GetConfig(db *sqlx.DB, publicKey string, sessionID int) (*classes.VPNConfig
 	return &config, nil
 }
 
-func ConnectHandler(db *sqlx.DB) gin.HandlerFunc {
+func ConnectHandler(wg *wgctrl.Client, db *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req ConnectRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -152,7 +153,7 @@ func ConnectHandler(db *sqlx.DB) gin.HandlerFunc {
 		if config.ID != 0 && config.ClientPublicKey != req.PublicKey {
 			log.Printf("[INFO] Key rotation for session %d", sessionID)
 
-			_ = RemoveWireGuardPeer(config.ClientPublicKey)
+			_ = RemoveWireGuardPeer(wg, config.ClientPublicKey)
 
 			err = UpdateClientKey(db, config.ID, req.PublicKey)
 			if err != nil {
@@ -162,7 +163,7 @@ func ConnectHandler(db *sqlx.DB) gin.HandlerFunc {
 			config.ClientPublicKey = req.PublicKey
 		}
 
-		err = AddWireGuardPeer(*config)
+		err = AddWireGuardPeer(wg, config)
 		if err != nil {
 			log.Printf("[ERROR] AddWireGuardPeer failed: %s", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "vpn sync error"})
@@ -176,7 +177,7 @@ func ConnectHandler(db *sqlx.DB) gin.HandlerFunc {
 			},
 			"peer": gin.H{
 				"public_key":  "vhyV0WHeL8SBT2wVMB0/3vIl+ZXQY8qa/oqworouclI=",
-				"endpoint":    "nermline.xyz:51820",
+				"endpoint":    "api.nermline.xyz:51820",
 				"allowed_ips": "91.108.56.0/22, 91.108.4.0/22, 91.108.8.0/22, 91.108.16.0/22, 91.108.12.0/22, 149.154.160.0/20, 91.105.192.0/23, 91.108.20.0/22, 185.76.151.0/24, 10.0.0.0/24",
 			},
 		})

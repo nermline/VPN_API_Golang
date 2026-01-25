@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/nermline/VPN_API_Golang/pkg"
+	"golang.zx2c4.com/wireguard/wgctrl"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
@@ -34,18 +35,27 @@ func main() {
 	log.Println("[LOG] Postgres database \"" + cfg.Postgres.DBName + "\" connected")
 	defer db.Close()
 
-	// gin.SetMode(gin.ReleaseMode)
+	wg, err := wgctrl.New()
+	if err != nil {
+		log.Panic(err)
+	}
+	log.Println("[LOG] Wireguard client connected")
+	defer wg.Close()
+
+	pkg.StartCleanupWorker(wg, db)
+
+	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 	router.POST("/v1/auth/register", pkg.RegisterHandler(db))
 	router.POST("/v1/auth/login", pkg.LoginHandler(db))
 	router.POST("/v1/auth/refresh", pkg.RefreshHandler(db))
-	router.Use(pkg.AuthMiddleware())
+	router.Use(pkg.AuthMiddleware(db))
 	{
 		router.GET("/v1/users/me", pkg.UserInfoHandler(db))
-		router.POST("/v1/session/connect", pkg.ConnectHandler(db))
-		router.POST("/v1/session/disconnect", pkg.DisconnectHandler(db))
-		router.POST("/v1/auth/logout", pkg.LogoutHandler(db))
+		router.POST("/v1/session/connect", pkg.ConnectHandler(wg, db))
+		router.POST("/v1/session/disconnect", pkg.DisconnectHandler(wg, db))
+		router.POST("/v1/auth/logout", pkg.LogoutHandler(wg, db))
 
 	}
-	router.Run("0.0.0.0:8088")
+	router.Run("127.0.0.1:8088")
 }
