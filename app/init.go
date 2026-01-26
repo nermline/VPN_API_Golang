@@ -92,11 +92,15 @@ func (a *App) Stop() {
 func setupRoutes(r *gin.Engine, db *sqlx.DB, wg *wgctrl.Client, cfg *pkg.Config) {
 	secretKey := pkg.GetJWTSecret()
 
-	r.POST("/v1/auth/register", pkg.RegisterHandler(db))
-	r.POST("/v1/auth/login", pkg.LoginHandler(db, secretKey))
-	r.POST("/v1/auth/refresh", pkg.RefreshHandler(db, secretKey))
+	authLimiter := pkg.NewRateLimiter("5-M")
+	apiLimiter := pkg.NewRateLimiter("120-M")
+
+	r.POST("/v1/auth/register", authLimiter, pkg.RegisterHandler(db))
+	r.POST("/v1/auth/login", authLimiter, pkg.LoginHandler(db, secretKey))
+	r.POST("/v1/auth/refresh", authLimiter, pkg.RefreshHandler(db, secretKey))
 
 	authGroup := r.Group("/")
+	authGroup.Use(apiLimiter)
 	authGroup.Use(pkg.AuthMiddleware(db, secretKey))
 	{
 		authGroup.GET("/v1/users/me", pkg.UserInfoHandler(db))
