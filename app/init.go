@@ -51,7 +51,13 @@ func New(configPath string) (*App, error) {
 	if !cfg.API.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
+
 	router := gin.Default()
+
+	if cfg.API.ForwardedByClientIP {
+		router.ForwardedByClientIP = true
+		router.SetTrustedProxies([]string{"127.0.0.1"})
+	}
 
 	setupRoutes(router, db, wg, cfg)
 

@@ -28,10 +28,11 @@ type WGConfig struct {
 }
 
 type APIConfig struct {
-	Listen string `yaml:"Listen"`
-	Port   string `yaml:"Port"`
-	Domain string `yaml:"Domain"`
-	Debug  bool   `yaml:"Debug"`
+	Listen              string `yaml:"Listen"`
+	Port                string `yaml:"Port"`
+	Domain              string `yaml:"Domain"`
+	Debug               bool   `yaml:"Debug"`
+	ForwardedByClientIP bool   `yaml:"ForwardedByClientIP"`
 }
 
 func LoadConfig(path string) (*Config, error) {

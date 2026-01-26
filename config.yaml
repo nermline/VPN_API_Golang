@@ -3,6 +3,7 @@ API:
   Port: 80
   Domain: domain.com
   Debug: false
+  ForwardedByClientIP: true
 Postgres:
   User: vpnuser
   Host: localhost
