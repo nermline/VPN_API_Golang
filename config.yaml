@@ -1,12 +1,13 @@
 API:
-  Listen: 127.0.0.1
-  Port: 8088
-  Domain: api.nermline.xyz
+  Listen: localhost
+  Port: 80
+  Domain: domain.com
+  Debug: false
 Postgres:
   User: vpnuser
   Host: localhost
   DBName: vpnservice
-  Password: 1423
+  Password: password
   SSLMode: disable
 Wireguard:
   Interface: wg0

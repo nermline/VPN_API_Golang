@@ -48,7 +48,9 @@ func New(configPath string) (*App, error) {
 
 	pkg.StartCleanupWorker(wg, cfg, db)
 
-	gin.SetMode(gin.ReleaseMode)
+	if !cfg.API.Debug {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	router := gin.Default()
 
 	setupRoutes(router, db, wg, cfg)

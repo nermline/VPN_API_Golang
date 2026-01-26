@@ -31,6 +31,7 @@ type APIConfig struct {
 	Listen string `yaml:"Listen"`
 	Port   string `yaml:"Port"`
 	Domain string `yaml:"Domain"`
+	Debug  bool   `yaml:"Debug"`
 }
 
 func LoadConfig(path string) (*Config, error) {
