@@ -66,10 +66,10 @@ func ValidateLoginData(req *LoginRequest) error {
 	return nil
 }
 
-func CheckUser(db *sqlx.DB, req LoginRequest) (*types.User, error) {
+func CheckUser(tx *sqlx.Tx, req LoginRequest) (*types.User, error) {
 	query := `SELECT * FROM users WHERE username = $1`
 	user := types.User{}
-	err := db.Get(&user, query, req.Username)
+	err := tx.Get(&user, query, req.Username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, errors.New("Credentials failed")
@@ -84,10 +84,10 @@ func CheckUser(db *sqlx.DB, req LoginRequest) (*types.User, error) {
 	return &user, nil
 }
 
-func IdentifyDevice(db *sqlx.DB, req LoginRequest) (*types.Device, error) {
+func IdentifyDevice(tx *sqlx.Tx, req LoginRequest) (*types.Device, error) {
 	const query = `SELECT * FROM devices WHERE device_uid = $1`
 	var device types.Device
-	err := db.Get(&device, query, req.DeviceUUID)
+	err := tx.Get(&device, query, req.DeviceUUID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return &types.Device{
@@ -117,7 +117,7 @@ func GenerateRefreshToken() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-func CreateSession(db *sqlx.DB, user types.User, device types.Device) (*types.Session, error) {
+func CreateSession(user types.User, device types.Device) (*types.Session, error) {
 	refreshToken, err := GenerateRefreshToken()
 	if err != nil {
 		return nil, fmt.Errorf("CreateSession: %v", err)
@@ -164,7 +164,7 @@ func GenerateAccessToken(user types.User, session types.Session, secretKey []byt
 	return signedToken, int(tokenLifeTime.Seconds()), nil
 }
 
-func WriteLoginChanges(db *sqlx.DB, device *types.Device, session *types.Session) error {
+func WriteLoginChanges(tx *sqlx.Tx, device *types.Device, session *types.Session) error {
 	var query string
 	var args []interface{}
 
@@ -195,7 +195,7 @@ func WriteLoginChanges(db *sqlx.DB, device *types.Device, session *types.Session
 			device.OS,
 		}
 
-		if err := db.QueryRow(query, args...).Scan(&session.ID); err != nil {
+		if err := tx.QueryRow(query, args...).Scan(&session.ID); err != nil {
 			return fmt.Errorf("WriteLoginChanges: %v", err)
 		}
 
@@ -222,7 +222,7 @@ func WriteLoginChanges(db *sqlx.DB, device *types.Device, session *types.Session
 			session.ExpiresAt,
 		}
 
-		if err := db.QueryRow(query, args...).Scan(&session.ID, &device.ID); err != nil {
+		if err := tx.QueryRow(query, args...).Scan(&session.ID, &device.ID); err != nil {
 			return fmt.Errorf("WriteLoginChanges: %v", err)
 		}
 	}
@@ -234,55 +234,62 @@ func LoginHandler(db *sqlx.DB, secretKey []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req LoginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			log.Printf("[ERROR] Invalid request body: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			log.Printf("[ERROR] Invalid request body: %v", err)
 			return
 		}
 
 		if err := ValidateLoginData(&req); err != nil {
-			log.Printf("[ERROR] Validation failed for username=%s: %v", req.Username, err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			log.Printf("[ERROR] Validation failed for username=%s: %v", req.Username, err)
 			return
 		}
 
-		user, err := CheckUser(db, req)
+		tx, err := db.Beginx()
 		if err != nil {
-			if err.Error() == "credentials failed" {
-				log.Printf("[ERROR] Auth failed for username=%s", req.Username)
-				c.JSON(http.StatusBadRequest, gin.H{"error": "username or password failed"})
-				return
-			}
-			log.Printf("[ERROR] Auth DB error for %s: %v", req.Username, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			log.Printf("[ERROR] %v", err)
 			return
 		}
+		defer tx.Rollback()
 
-		device, err := IdentifyDevice(db, req)
+		user, err := CheckUser(tx, req)
 		if err != nil {
-			log.Printf("[ERROR] %v: ", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "username or password failed"})
+			log.Printf("[ERROR] %v", err)
 			return
 		}
 
-		session, err := CreateSession(db, *user, *device)
+		device, err := IdentifyDevice(tx, req)
 		if err != nil {
-			log.Printf("[ERROR] %v: ", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			log.Printf("[ERROR] %v", err)
 			return
 		}
 
-		if err := WriteLoginChanges(db, device, session); err != nil {
-			log.Printf("[ERROR] %v: ", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		session, err := CreateSession(*user, *device)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			log.Printf("[ERROR] %v", err)
+			return
+		}
+
+		if err := WriteLoginChanges(tx, device, session); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			log.Printf("[ERROR] %v", err)
 			return
 		}
 
 		accessToken, accessTokenLifeTime, err := GenerateAccessToken(*user, *session, secretKey)
 		if err != nil {
-			log.Printf("[ERROR] %v: ", err)
-			// Тут можна було б теоретично відкотити транзакцію, але в нас її немає.
-			// Сесія залишиться в базі, але юзер не отримає токен. Це не критично, просто "мертва" сесія.
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "token error"})
+			log.Printf("[ERROR] %v", err)
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			log.Printf("[ERROR] Login commit failed: %v", err)
 			return
 		}
 

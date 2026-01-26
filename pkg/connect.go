@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"time"
 
@@ -35,12 +34,12 @@ type WireguardConfigResponse struct {
 	Peer      PeerConfig      `json:"peer"`
 }
 
-func UpdateClientKey(db *sqlx.DB, configID int, newKey string) error {
-	_, err := db.Exec("UPDATE vpn_configs SET client_public_key = $1 WHERE id = $2", newKey, configID)
+func UpdateClientKey(tx *sqlx.Tx, configID int, newKey string) error {
+	_, err := tx.Exec("UPDATE vpn_configs SET client_public_key = $1 WHERE id = $2", newKey, configID)
 	return fmt.Errorf("UpdateClientKey: ", err)
 }
 
-func WriteConnectChanges(db *sqlx.DB, config *types.VPNConfig) error {
+func WriteConnectChanges(tx *sqlx.Tx, config *types.VPNConfig) error {
 	var args []interface{}
 
 	query := `INSERT INTO vpn_configs (session_id, internal_ip, client_public_key, created_at)
@@ -53,43 +52,27 @@ func WriteConnectChanges(db *sqlx.DB, config *types.VPNConfig) error {
 		config.ClientPublicKey,
 		config.CreatedAt,
 	}
-	if err := db.QueryRow(query, args...).Scan(&config.ID); err != nil {
+	if err := tx.QueryRow(query, args...).Scan(&config.ID); err != nil {
 		return fmt.Errorf("WriteConnectChanges: %v", err)
 	}
 	return nil
 }
 
-func GetFreeIP(db *sqlx.DB, cidr string) (string, error) {
-	_, ipNet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return "", fmt.Errorf("GetFreeIP: %v", err)
-	}
-
-	networkIP := ipNet.IP.To4()
-	if networkIP == nil {
-		return "", errors.New("GetFreeIP: Only IPv4 is supported")
-	}
-
-	baseIP := fmt.Sprintf("%d.%d.%d", networkIP[0], networkIP[1], networkIP[2])
-
-	query := fmt.Sprintf(`
-        SELECT '%s.' || s.i
-        FROM generate_series(2, 254) AS s(i)
-        WHERE NOT EXISTS (
-            SELECT 1 
-            FROM vpn_configs 
-            WHERE internal_ip = ('%s.' || s.i)::inet
-        )
-        ORDER BY s.i ASC
-        LIMIT 1;
-    `, baseIP, baseIP)
-
+func GetFreeIP(tx *sqlx.Tx) (string, error) {
+	query := `
+        SELECT ip::text
+        FROM ip_pool
+        WHERE is_used = FALSE
+        ORDER BY ip ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED;
+    `
 	var newIP string
-	err = db.Get(&newIP, query)
+	err := tx.Get(&newIP, query)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("GetFreeIP: IP pool is full")
+			return "", errors.New("GetFreeIP: Ip pool is full")
 		}
 		return "", fmt.Errorf("GetFreeIP: %v", err)
 	}
@@ -97,30 +80,32 @@ func GetFreeIP(db *sqlx.DB, cidr string) (string, error) {
 	return newIP, nil
 }
 
-func GetConfig(db *sqlx.DB, publicKey string, sessionID int) (*types.VPNConfig, error) {
+func GetConfig(tx *sqlx.Tx, publicKey string, sessionID int) (*types.VPNConfig, error) {
 	var vpn_config types.VPNConfig
-	err := db.Get(&vpn_config, "SELECT * FROM vpn_configs WHERE session_id = $1", sessionID)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			internalIP, err := GetFreeIP(db, "10.0.0.0/24")
-			if err != nil {
-				return nil, fmt.Errorf("GetConfig: %v", err)
-			}
-			vpn_config := types.VPNConfig{
-				ID:              0,
-				SessionID:       sessionID,
-				InternalIP:      internalIP,
-				ClientPublicKey: publicKey,
-				CreatedAt:       time.Now(),
-			}
-			return &vpn_config, nil
-		}
+	err := tx.Get(&vpn_config, "SELECT * FROM vpn_configs WHERE session_id = $1", sessionID)
+
+	if err == nil {
+		return &vpn_config, nil
+	}
+
+	if err != sql.ErrNoRows {
 		return nil, fmt.Errorf("GetConfig: %v", err)
 	}
 
-	return &vpn_config, nil
-}
+	internalIP, err := GetFreeIP(tx)
+	if err != nil {
+		return nil, fmt.Errorf("GetConfig: %v", err)
+	}
 
+	newConfig := types.VPNConfig{
+		ID:              0,
+		SessionID:       sessionID,
+		InternalIP:      internalIP,
+		ClientPublicKey: publicKey,
+		CreatedAt:       time.Now(),
+	}
+	return &newConfig, nil
+}
 func ConnectHandler(wg *wgctrl.Client, config *Config, db *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req ConnectRequest
@@ -137,40 +122,33 @@ func ConnectHandler(wg *wgctrl.Client, config *Config, db *sqlx.DB) gin.HandlerF
 			return
 		}
 
-		var vpn_config *types.VPNConfig
-		maxRetries := 3
+		tx, err := db.Beginx()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			log.Printf("[ERROR] %v", err)
+			return
+		}
+		defer tx.Rollback()
 
-		for i := 0; i < maxRetries; i++ {
-			vpn_config, err = GetConfig(db, req.PublicKey, sessionID)
-			if err != nil {
-				log.Printf("[ERROR] GetConfig attempt %v failed: %v", i, err)
-				if i == maxRetries-1 {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "database busy"})
-					return
-				}
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-
-			if vpn_config.ID != 0 {
-				break
-			}
-
-			err = WriteConnectChanges(db, vpn_config)
-			if err == nil {
-				break
-			}
-
-			log.Printf("[WARN] Race condition detected for IP %v, retrying...", vpn_config.InternalIP)
-			time.Sleep(50 * time.Millisecond)
+		vpn_config, err := GetConfig(tx, req.PublicKey, sessionID)
+		if err != nil {
+			log.Printf("[ERROR] %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			return
 		}
 
-		if vpn_config.ID != 0 && vpn_config.ClientPublicKey != req.PublicKey {
-			log.Printf("[INFO] Key rotation for session %v", sessionID)
-
+		if vpn_config.ID == 0 {
+			err = WriteConnectChanges(tx, vpn_config)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+				log.Printf("[ERROR] %v", err)
+				return
+			}
+		} else if vpn_config.ClientPublicKey != req.PublicKey {
+			log.Printf("[INFO] Key rotation for session %d", sessionID)
 			_ = RemoveWireGuardPeer(wg, config, vpn_config.ClientPublicKey)
 
-			err = UpdateClientKey(db, vpn_config.ID, req.PublicKey)
+			err = UpdateClientKey(tx, vpn_config.ID, req.PublicKey)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 				log.Printf("[ERROR] %v", err)
@@ -179,14 +157,25 @@ func ConnectHandler(wg *wgctrl.Client, config *Config, db *sqlx.DB) gin.HandlerF
 			vpn_config.ClientPublicKey = req.PublicKey
 		}
 
+		if err := tx.Commit(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			log.Printf("[ERROR] Commit failed: %v", err)
+			return
+		}
+
 		err = AddWireGuardPeer(wg, config, vpn_config)
 		if err != nil {
-			log.Printf("[ERROR] Failed to add new peer to %v: %v", config.Wireguard.Interface, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			log.Printf("[ERROR] %v", err)
 			return
 		}
 
 		device, err := wg.Device(config.Wireguard.Interface)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			log.Printf("[ERROR] Failed to get WG device: %s", err)
+			return
+		}
 
 		resp := WireguardConfigResponse{
 			Interface: InterfaceConfig{
@@ -194,9 +183,11 @@ func ConnectHandler(wg *wgctrl.Client, config *Config, db *sqlx.DB) gin.HandlerF
 				DNS:     config.Wireguard.DNS,
 			},
 			Peer: PeerConfig{
-				PublicKey:  device.PublicKey.String(),
-				Endpoint:   config.API.Domain + config.Wireguard.Port,
-				AllowedIPs: []string{"91.108.56.0/22", "91.108.4.0/22", "91.108.8.0/22", "91.108.16.0/22", "91.108.12.0/22", "149.154.160.0/20", "91.105.192.0/23", "91.108.20.0/22", "185.76.151.0/24", "10.0.0.0/24"},
+				PublicKey: device.PublicKey.String(),
+				Endpoint:  fmt.Sprintf("%s:%s", config.API.Domain, config.Wireguard.Port),
+				AllowedIPs: []string{
+					"0.0.0.0/0",
+				},
 			},
 		}
 
