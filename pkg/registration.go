@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 	"github.com/nermline/VPN_API_Golang/types"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -103,14 +104,20 @@ func RegisterHandler(db *sqlx.DB) gin.HandlerFunc {
 
 		newID, err := InsertUser(db, user)
 		if err != nil {
-			log.Printf("[ERROR] Failed to create user \"%v\" (%v) in database: %v | Client: %v", user.Username, user.Email, err, c.ClientIP())
-			if err.Error() == "InsertUser: pq: duplicate key value violates unique constraint \"users_email_key\"" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "email already in use"})
-			} else if err.Error() == "InsertUser: pq: duplicate key value violates unique constraint \"users_username_key\"" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "username already in use"})
-			} else {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			var pqErr *pq.Error
+			if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+				if strings.Contains(pqErr.Constraint, "email") {
+					c.JSON(http.StatusConflict, gin.H{"error": "email already in use"})
+					return
+				}
+				if strings.Contains(pqErr.Constraint, "username") {
+					c.JSON(http.StatusConflict, gin.H{"error": "username already in use"})
+					return
+				}
 			}
+
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			log.Printf("[ERROR] Failed to insert user: %v", err)
 			return
 		}
 
