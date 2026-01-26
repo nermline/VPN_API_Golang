@@ -23,7 +23,7 @@ func NewRateLimiter(formattedRate string) gin.HandlerFunc {
 	return mgin.NewMiddleware(instance, mgin.WithLimitReachedHandler(func(c *gin.Context) {
 		log.Printf("[WARN] IP %s exceeded rate limit", c.ClientIP())
 		c.JSON(http.StatusTooManyRequests, gin.H{
-			"error": "too many requests, please try again later",
+			"error": "too many requests",
 		})
 	}))
 }
