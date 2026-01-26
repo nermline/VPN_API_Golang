@@ -89,7 +89,7 @@ func setupRoutes(r *gin.Engine, db *sqlx.DB, wg *wgctrl.Client, cfg *pkg.Config)
 	r.POST("/v1/auth/refresh", pkg.RefreshHandler(db, secretKey))
 
 	authGroup := r.Group("/")
-	authGroup.Use(pkg.AuthMiddleware(db))
+	authGroup.Use(pkg.AuthMiddleware(db, secretKey))
 	{
 		authGroup.GET("/v1/users/me", pkg.UserInfoHandler(db))
 		authGroup.POST("/v1/session/connect", pkg.ConnectHandler(wg, cfg, db))

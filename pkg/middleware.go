@@ -11,7 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-func AuthMiddleware(db *sqlx.DB) gin.HandlerFunc {
+func AuthMiddleware(db *sqlx.DB, secretKey []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -31,7 +31,7 @@ func AuthMiddleware(db *sqlx.DB) gin.HandlerFunc {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, errors.New("AuthMiddleware: Unexpected signing method")
 			}
-			return GetJWTSecret(), nil
+			return secretKey, nil
 		})
 
 		if err != nil || !token.Valid {
