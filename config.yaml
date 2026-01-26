@@ -2,7 +2,7 @@ API:
   Listen: 127.0.0.1
   Port: 8088
   Domain: api.nermline.xyz
-Posgress:
+Postgres:
   User: vpnuser
   Host: localhost
   DBName: vpnservice

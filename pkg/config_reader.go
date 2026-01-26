@@ -8,7 +8,7 @@ import (
 )
 
 type Config struct {
-	Postgres  DBConfig  `yaml:"Posgress"`
+	Postgres  DBConfig  `yaml:"Postgres"`
 	Wireguard WGConfig  `yaml:"Wireguard"`
 	API       APIConfig `yaml:"API"`
 }
