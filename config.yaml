@@ -1,6 +1,6 @@
 API:
   Listen: 127.0.0.1
-  Port: 8080
+  Port: 8088
   Domain: api.nermline.xyz
 Posgress:
   User: vpnuser
