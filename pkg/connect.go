@@ -36,7 +36,7 @@ type WireguardConfigResponse struct {
 
 func UpdateClientKey(tx *sqlx.Tx, configID int, newKey string) error {
 	_, err := tx.Exec("UPDATE vpn_configs SET client_public_key = $1 WHERE id = $2", newKey, configID)
-	return fmt.Errorf("UpdateClientKey: ", err)
+	return err
 }
 
 func WriteConnectChanges(tx *sqlx.Tx, config *types.VPNConfig) error {
@@ -151,7 +151,7 @@ func ConnectHandler(wg *wgctrl.Client, config *Config, db *sqlx.DB) gin.HandlerF
 			err = UpdateClientKey(tx, vpn_config.ID, req.PublicKey)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
-				log.Printf("[ERROR] %v", err)
+				log.Printf("[ERROR] UpdateClientKey: %v", err)
 				return
 			}
 			vpn_config.ClientPublicKey = req.PublicKey

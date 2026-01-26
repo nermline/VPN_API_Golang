@@ -18,7 +18,7 @@ func AddWireGuardPeer(wg *wgctrl.Client, config *Config, vpn_config *types.VPNCo
 		return fmt.Errorf("AddWireGuardPeer (%v): %v", vpn_config.ClientPublicKey, err)
 	}
 
-	_, ipNet, err := net.ParseCIDR(vpn_config.InternalIP + "/32")
+	_, ipNet, err := net.ParseCIDR(vpn_config.InternalIP)
 	if err != nil {
 		ip := net.ParseIP(vpn_config.InternalIP)
 		if ip == nil {
