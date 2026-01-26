@@ -140,7 +140,7 @@ func CreateSession(db *sqlx.DB, user types.User, device types.Device) (*types.Se
 func GetJWTSecret() []byte {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		log.Panic("[CRITICAL] ADD ENV VARIABLE \"JWT_SECRET\" RIGHT NOW!")
+		log.Fatalf("[CRITICAL] ADD ENV VARIABLE \"JWT_SECRET\" RIGHT NOW!")
 	}
 	return []byte(secret)
 }

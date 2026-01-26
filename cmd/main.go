@@ -1,63 +1,21 @@
 package main
 
 import (
-	"io"
 	"log"
-	"os"
 
-	"github.com/nermline/VPN_API_Golang/pkg"
-	"golang.zx2c4.com/wireguard/wgctrl"
-
-	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+	"github.com/nermline/VPN_API_Golang/app"
 )
 
 func main() {
-	f, err := os.OpenFile("history.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	application, err := app.New("config.yaml")
 	if err != nil {
-		log.Fatal("[CRITICAL] Failed to open log file: %v", err)
+		log.Fatalf("[CRITICAL] Failed to initialize app: %v", err)
 	}
-	defer f.Close()
-	multiWriter := io.MultiWriter(f, os.Stdout)
-	log.SetOutput(multiWriter)
 
-	const path = "./config.yaml"
-	cfg, err := pkg.LoadConfig(path)
-	if err != nil {
-		log.Panic("[CRITICAL] Failed to open config file: %v", err)
+	defer application.Stop()
+
+	if err := application.Run(); err != nil {
+		log.Fatalf("[CRITICAL] Server failed: %v", err)
 	}
-	log.Println("[LOG] Config " + path + " loaded successfully")
-
-	db, err := pkg.NewPostgres(cfg.Postgres)
-	if err != nil {
-		log.Panic("[CRITICAL] Failed to initialize DB: %v", err)
-	}
-	log.Println("[LOG] Postgres database \"" + cfg.Postgres.DBName + "\" connected")
-	defer db.Close()
-
-	wg, err := wgctrl.New()
-	if err != nil {
-		log.Panic("[CRITICAL] Failed connect to Wireguard client: %v", err)
-	}
-	log.Println("[LOG] Wireguard client connected")
-	defer wg.Close()
-
-	secretKey := pkg.GetJWTSecret()
-
-	pkg.StartCleanupWorker(wg, cfg, db)
-
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.Default()
-	router.POST("/v1/auth/register", pkg.RegisterHandler(db))
-	router.POST("/v1/auth/login", pkg.LoginHandler(db, secretKey))
-	router.POST("/v1/auth/refresh", pkg.RefreshHandler(db, secretKey))
-	router.Use(pkg.AuthMiddleware(db))
-	{
-		router.GET("/v1/users/me", pkg.UserInfoHandler(db))
-		router.POST("/v1/session/connect", pkg.ConnectHandler(wg, cfg, db))
-		router.POST("/v1/session/disconnect", pkg.DisconnectHandler(wg, cfg, db))
-		router.POST("/v1/auth/logout", pkg.LogoutHandler(wg, cfg, db))
-
-	}
-	router.Run(cfg.API.Listen + ":" + cfg.API.Port)
 }
